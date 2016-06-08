@@ -251,6 +251,7 @@ sub export_contactgroups {
 # Export Nagios hosts and templates of hosts using Centreon CLAPI format
 sub export_hosts {
 	my @hosts_array = @_;
+	my $tmpParentsList;     # Storage bin to allow parent assignmants after all hosts are loaded. 
 	foreach my $host ( @hosts_array ) {
 		if ( defined ( $host->use ) ) {
 			my @tpls_used = split ( ',', $host->use );
@@ -279,6 +280,8 @@ sub export_hosts {
 				printf ( "HOST;ADD;%s;%s;%s;%s;%s;\n", $host->host_name, ( defined ( $host->alias ) ? $host->alias : $host->name ), $host->address, $list_of_tpl, $default_poller );
 				$type = "HOST";
 				$host_name = $host->host_name;
+				# Apply Templates to the Host to properly add services
+				printf ( "HOST;APPLYTPL;%s\n", $host_name );
 			}
 			printf ( "%s;setparam;%s;2d_coords;%s\n", $type, $host_name, $host->{'2d_coords'} ) if ( defined ( $host->{'2d_coords'} ) );
 			printf ( "%s;setparam;%s;3d_coords;%s\n", $type, $host_name, $host->{'3d_coords'} ) if ( defined ( $host->{'3d_coords'} ) );
@@ -321,14 +324,16 @@ sub export_hosts {
 			# Define parental dependencies
 			if ( defined ( $host->parents ) ) {
 				my $parents;
-				foreach my $host ( @{$host->parents} ) {
+				# Reusing variable names within the same subroutine can be confusing
+				foreach my $p_host ( @{$host->parents} ) {
 					if ( $parents == "" ) {
-						$parents = $host_name;
+						$parents = $p_host->host_name;   # original variable was incorectly $host_name
 					} else {
-						$parents .= "|".$host_name;
+						$parents .= "|".$p_host->host_name;
 					}
 				}
-				printf ( "%s;setparam;%s;parents;%s\n", $type, $host_name, $parents );
+				# Save to parent list to be updated after we have completed loading hosts
+	    			$tmpParentsList .= sprintf ( "HOST;SETPARENT;%s;%s\n", $host_name, $parents );
 			}
 			printf ( "%s;setparam;%s;passive_checks_enabled;%s\n", $type, $host_name, $host->passive_checks_enabled ) if ( defined ( $host->passive_checks_enabled ) );
 			printf ( "%s;setparam;%s;process_perf_data;%s\n", $type, $host_name, $host->process_perf_data ) if ( defined ( $host->process_perf_data ) );
@@ -343,7 +348,11 @@ sub export_hosts {
 				my $contactgroups_list = "";
 				if ( scalar @{$host->contact_groups} > 1 ) {
 					foreach my $item ( @{$host->contact_groups} ) {
-						$contactgroups_list .= sprintf ( "%s", $item) . "|";
+						if( ref( $item ) eq "" ) { 
+						    $contactgroups_list .= sprintf ( "%s", $item) . "|";
+						} else {
+						    $contactgroups_list .= sprintf ( "%s", $item->contactgroup_name) . "|";
+						}
 					}
 					$contactgroups_list =~ s/\|$//;
 					printf ( "%s;setcontactgroup;%s;%s\n", $type, $host_name, $contactgroups_list );
@@ -392,6 +401,8 @@ sub export_hosts {
 			$hostTemplates_exported{$host->name} = 1;
 		}
 	}
+	# Now that all hosts have been added, parent can be assigned
+	print $tmpParentsList;
 }
 
 # Export Nagios hostgroups using Centreon CLAPI format
